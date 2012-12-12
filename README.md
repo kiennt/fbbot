@@ -13,4 +13,4 @@ auto add friends, ....
 Please take a look at test_facebook.py
 
 
-That 's too much words. Let 's start code :)
+That 's too many words. Let 's start code :)
