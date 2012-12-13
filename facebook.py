@@ -2,12 +2,53 @@ import time
 import re
 import requests
 import hashlib
+import sleekxmpp
 
+import logging
+import threading
 from utils import BaseRequest
 from utils import RequestParams
 
+#logging.basicConfig(level=logging.DEBUG, format='%(levelname)-8s %(message)s')
+
+
 class FacebookLoginFailedException(Exception):
     pass
+
+
+class FacebookChatBot(sleekxmpp.ClientXMPP):
+    def __init__(self, uid):
+        jid = '%s@chat.facebook.com' % uid
+        sleekxmpp.ClientXMPP.__init__(self, jid, '')
+        self.add_event_handler("session_start", self.start)
+        self.add_event_handler("message", self.process_message)
+        self.add_event_handler("roster_update", self.update_roster)
+
+    def start(self, event):
+        self.send_presence()
+        self.get_roster()
+
+    def process_message(self, message):
+        if message['type'] in ('chat', 'normal'):
+            sender = self.friends[message['from']]
+            body = message['body']
+            print '[%s]: %s' % (sender, body)
+
+    def update_roster(self, iq):
+        self.friends = {}
+        friends = iq['roster'].get_items()
+        for k, v in friends.items():
+            self.friends[k] = v['name']
+
+class XMPPThreading(threading.Thread):
+    def __init__(self, xmpp):
+        threading.Thread.__init__(self)
+        self.xmpp = xmpp
+
+    def run(self):
+        if self.xmpp.connect():
+            self.xmpp.process(block=True)
+
 
 class FacebookClient(BaseRequest):
     API_KEY = "882a8490361da98702bf97a021ddc14d"
@@ -89,7 +130,20 @@ class FacebookClient(BaseRequest):
             raise FacebookLoginFailedException(res.content)
         if 'access_token' in res.json:
             self.access_token = res.json['access_token']
+            self.uid = res.json['uid']
         return res.json
+
+    def send_message(self, friend_id, message):
+        if not hasattr(self, 'xmpp'):
+            self.xmpp = FacebookChatBot(self.uid)
+            self.xmpp.credentials['api_key'] = self.API_KEY
+            self.xmpp.credentials['access_token'] = self.access_token
+            xmpp_thread = XMPPThreading(self.xmpp)
+            xmpp_thread.start()
+
+        self.xmpp.send_message(mto='-%s@chat.facebook.com' % friend_id,
+                mbody=message, mtype='chat')
+
 
     def upload_profile_picture(self, image_path):
         pass
@@ -122,3 +176,5 @@ class FacebookClient(BaseRequest):
             'access_token': self.access_token,
             'q': query
         })
+
+
